@@ -145,11 +145,12 @@
         </div>
         {% if config.config_allow_reverse_proxy_header_login %}
         <div class="row">
-            <div class="col-xs-6 col-sm-7">{{_('Reverse proxy header name')}}</div>
+            <div class="col-xs-6 col-sm-7">{{_('Reverse Proxy Header Name')}}</div>
             <div class="col-xs-6 col-sm-5">{{ config.config_reverse_proxy_login_header_name }}</div>
         </div>
         {% endif %}
       </div>
+      <a class="btn btn-default" id="db_config" href="{{url_for('admin.db_configuration')}}">{{_('Edit Calibre Database Configuration')}}</a>
       <a class="btn btn-default" id="basic_config" href="{{url_for('admin.configuration')}}">{{_('Edit Basic Configuration')}}</a>
       <a class="btn btn-default" id="view_config" href="{{url_for('admin.view_configuration')}}">{{_('Edit UI Configuration')}}</a>
     </div>

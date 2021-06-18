@@ -27,6 +27,15 @@ import json
 from shutil import copyfile
 from uuid import uuid4
 
+# Improve this to check if scholarly is available in a global way, like other pythonic libraries
+have_scholar = True
+try:
+    from scholarly import scholarly
+except ImportError:
+    have_scholar = False
+    pass
+
+
 from babel import Locale as LC
 from babel.core import UnknownLocaleError
 from flask import Blueprint, request, flash, redirect, url_for, abort, Markup, Response
@@ -358,7 +367,7 @@ def render_edit_book(book_id):
     cc = calibre_db.session.query(db.Custom_Columns).filter(db.Custom_Columns.datatype.notin_(db.cc_exceptions)).all()
     book = calibre_db.get_filtered_book(book_id, allow_show_archived=True)
     if not book:
-        flash(_(u"Error opening eBook. File does not exist or file is not accessible"), category="error")
+        flash(_(u"Oops! Selected book title is unavailable. File does not exist or is not accessible"), category="error")
         return redirect(url_for("web.index"))
 
     for lang in book.languages:
@@ -439,6 +448,9 @@ def edit_book_series_index(series_index, book):
     # Add default series_index to book
     modif_date = False
     series_index = series_index or '1'
+    if not series_index.replace('.', '', 1).isdigit():
+        flash(_("%(seriesindex)s is not a valid number, skipping", seriesindex=series_index), category="warning")
+        return False
     if book.series_index != series_index:
         book.series_index = series_index
         modif_date = True
@@ -495,12 +507,19 @@ def edit_book_publisher(publishers, book):
     return changed
 
 
-def edit_cc_data_number(book_id, book, c, to_save, cc_db_value, cc_string):
+def edit_cc_data_value(book_id, book, c, to_save, cc_db_value, cc_string):
     changed = False
     if to_save[cc_string] == 'None':
         to_save[cc_string] = None
     elif c.datatype == 'bool':
         to_save[cc_string] = 1 if to_save[cc_string] == 'True' else 0
+    elif c.datatype == 'comments':
+        to_save[cc_string] = Markup(to_save[cc_string]).unescape()
+    elif c.datatype == 'datetime':
+        try:
+            to_save[cc_string] = datetime.strptime(to_save[cc_string], "%Y-%m-%d")
+        except ValueError:
+            to_save[cc_string] = db.Books.DEFAULT_PUBDATE
 
     if to_save[cc_string] != cc_db_value:
         if cc_db_value is not None:
@@ -559,8 +578,8 @@ def edit_cc_data(book_id, book, to_save):
             else:
                 cc_db_value = None
             if to_save[cc_string].strip():
-                if c.datatype == 'int' or c.datatype == 'bool' or c.datatype == 'float':
-                    changed, to_save = edit_cc_data_number(book_id, book, c, to_save, cc_db_value, cc_string)
+                if c.datatype in ['int', 'bool', 'float', "datetime", "comments"]:
+                    changed, to_save = edit_cc_data_value(book_id, book, c, to_save, cc_db_value, cc_string)
                 else:
                     changed, to_save = edit_cc_data_string(book, c, to_save, cc_db_value, cc_string)
             else:
@@ -721,7 +740,7 @@ def edit_book(book_id):
 
     # Book not found
     if not book:
-        flash(_(u"Error opening eBook. File does not exist or file is not accessible"), category="error")
+        flash(_(u"Oops! Selected book title is unavailable. File does not exist or is not accessible"), category="error")
         return redirect(url_for("web.index"))
 
     meta = upload_single_file(request, book, book_id)
@@ -767,7 +786,7 @@ def edit_book(book_id):
             # Add default series_index to book
             modif_date |= edit_book_series_index(to_save["series_index"], book)
             # Handle book comments/description
-            modif_date |= edit_book_comments(to_save["description"], book)
+            modif_date |= edit_book_comments(Markup(to_save['description']).unescape(), book)
             # Handle identifiers
             input_identifiers = identifier_list(to_save, book)
             modification, warning = modify_identifiers(input_identifiers, book.identifiers, calibre_db.session)
@@ -1051,6 +1070,23 @@ def convert_bookformat(book_id):
         flash(_(u"There was an error converting this book: %(res)s", res=rtn), category="error")
     return redirect(url_for('editbook.edit_book', book_id=book_id))
 
+@editbook.route("/scholarsearch/<query>",methods=['GET'])
+@login_required_if_no_ano
+@edit_required
+def scholar_search(query):
+    if have_scholar:
+        scholar_gen = scholarly.search_pubs(' '.join(query.split('+')))
+        i=0
+        result = []
+        for publication in scholar_gen:
+            del publication['source']
+            result.append(publication)
+            i+=1
+            if(i>=10):
+                break
+        return Response(json.dumps(result),mimetype='application/json')
+    else:
+        return []
 
 @editbook.route("/ajax/editbooks/<param>", methods=['POST'])
 @login_required_if_no_ano
@@ -1112,11 +1148,15 @@ def edit_list_book(param):
                                    'newValue':  ' & '.join([author.replace('|',',') for author in input_authors])}),
                        mimetype='application/json')
     book.last_modified = datetime.utcnow()
-    calibre_db.session.commit()
-    # revert change for sort if automatic fields link is deactivated
-    if param == 'title' and vals.get('checkT') == "false":
-        book.sort = sort
+    try:
         calibre_db.session.commit()
+        # revert change for sort if automatic fields link is deactivated
+        if param == 'title' and vals.get('checkT') == "false":
+            book.sort = sort
+            calibre_db.session.commit()
+    except (OperationalError, IntegrityError) as e:
+        calibre_db.session.rollback()
+        log.error("Database error: %s", e)
     return ret
 
 
@@ -1187,4 +1227,44 @@ def merge_list_book():
                                                         to_name))
                     delete_book(from_book.id,"", True)
                     return json.dumps({'success': True})
+    return ""
+
+@editbook.route("/ajax/xchange", methods=['POST'])
+@login_required
+@edit_required
+def table_xchange_author_title():
+    vals = request.get_json().get('xchange')
+    if vals:
+        for val in vals:
+            modif_date = False
+            book = calibre_db.get_book(val)
+            authors = book.title
+            entries = calibre_db.order_authors(book)
+            author_names = []
+            for authr in entries.authors:
+                author_names.append(authr.name.replace('|', ','))
+
+            title_change = handle_title_on_edit(book, " ".join(author_names))
+            input_authors, authorchange = handle_author_on_edit(book, authors)
+            if authorchange or title_change:
+                edited_books_id = book.id
+                modif_date = True
+
+            if config.config_use_google_drive:
+                gdriveutils.updateGdriveCalibreFromLocal()
+
+            if edited_books_id:
+                helper.update_dir_stucture(edited_books_id, config.config_calibre_dir, input_authors[0])
+            if modif_date:
+                book.last_modified = datetime.utcnow()
+            try:
+                calibre_db.session.commit()
+            except (OperationalError, IntegrityError) as e:
+                calibre_db.session.rollback()
+                log.error("Database error: %s", e)
+                return json.dumps({'success': False})
+
+            if config.config_use_google_drive:
+                gdriveutils.updateGdriveCalibreFromLocal()
+        return json.dumps({'success': True})
     return ""

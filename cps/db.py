@@ -59,7 +59,7 @@ except ImportError:
 
 log = logger.create()
 
-cc_exceptions = ['datetime', 'comments', 'composite', 'series']
+cc_exceptions = ['composite', 'series']
 cc_classes = {}
 
 Base = declarative_base()
@@ -473,7 +473,7 @@ class CalibreDB():
                                  }
                     books_custom_column_links[row.id] = type(str('books_custom_column_' + str(row.id) + '_link'),
                                                              (Base,), dicttable)
-                else:
+                if row.datatype in ['rating', 'text', 'enumeration']:
                     books_custom_column_links[row.id] = Table('books_custom_column_' + str(row.id) + '_link',
                                                               Base.metadata,
                                                               Column('book', Integer, ForeignKey('books.id'),
@@ -491,23 +491,25 @@ class CalibreDB():
                     ccdict['value'] = Column(Float)
                 elif row.datatype == 'int':
                     ccdict['value'] = Column(Integer)
+                elif row.datatype == 'datetime':
+                    ccdict['value'] = Column(TIMESTAMP)
                 elif row.datatype == 'bool':
                     ccdict['value'] = Column(Boolean)
                 else:
                     ccdict['value'] = Column(String)
-                if row.datatype in ['float', 'int', 'bool']:
+                if row.datatype in ['float', 'int', 'bool', 'datetime', 'comments']:
                     ccdict['book'] = Column(Integer, ForeignKey('books.id'))
                 cc_classes[row.id] = type(str('custom_column_' + str(row.id)), (Base,), ccdict)
 
         for cc_id in cc_ids:
-            if (cc_id[1] == 'bool') or (cc_id[1] == 'int') or (cc_id[1] == 'float'):
+            if cc_id[1] in ['bool', 'int', 'float', 'datetime', 'comments']:
                 setattr(Books,
                         'custom_column_' + str(cc_id[0]),
                         relationship(cc_classes[cc_id[0]],
                                      primaryjoin=(
                                          Books.id == cc_classes[cc_id[0]].book),
                                      backref='books'))
-            elif (cc_id[1] == 'series'):
+            elif cc_id[1] == 'series':
                 setattr(Books,
                         'custom_column_' + str(cc_id[0]),
                         relationship(books_custom_column_links[cc_id[0]],
@@ -522,19 +524,44 @@ class CalibreDB():
         return cc_classes
 
     @classmethod
-    def setup_db(cls, config, app_db_path):
+    def check_valid_db(cls, config_calibre_dir, app_db_path):
+        if not config_calibre_dir:
+            return False
+        dbpath = os.path.join(config_calibre_dir, "metadata.db")
+        if not os.path.exists(dbpath):
+            return False
+        try:
+            check_engine = create_engine('sqlite://',
+                          echo=False,
+                          isolation_level="SERIALIZABLE",
+                          connect_args={'check_same_thread': False},
+                          poolclass=StaticPool)
+            with check_engine.begin() as connection:
+                connection.execute(text("attach database '{}' as calibre;".format(dbpath)))
+                connection.execute(text("attach database '{}' as app_settings;".format(app_db_path)))
+            check_engine.connect()
+        except Exception:
+            return False
+        return True
+
+    @classmethod
+    def update_config(cls, config):
         cls.config = config
+
+    @classmethod
+    def setup_db(cls, config_calibre_dir, app_db_path):
+        # cls.config = config
         cls.dispose()
 
         # toDo: if db changed -> delete shelfs, delete download books, delete read boks, kobo sync??
 
-        if not config.config_calibre_dir:
-            config.invalidate()
+        if not config_calibre_dir:
+            cls.config.invalidate()
             return False
 
-        dbpath = os.path.join(config.config_calibre_dir, "metadata.db")
+        dbpath = os.path.join(config_calibre_dir, "metadata.db")
         if not os.path.exists(dbpath):
-            config.invalidate()
+            cls.config.invalidate()
             return False
 
         try:
@@ -550,14 +577,14 @@ class CalibreDB():
             conn = cls.engine.connect()
             # conn.text_factory = lambda b: b.decode(errors = 'ignore') possible fix for #1302
         except Exception as ex:
-            config.invalidate(ex)
+            cls.config.invalidate(ex)
             return False
 
-        config.db_configured = True
+        cls.config.db_configured = True
 
         if not cc_classes:
             try:
-                cc = conn.execute("SELECT id, datatype FROM custom_columns")
+                cc = conn.execute(text("SELECT id, datatype FROM custom_columns"))
                 cls.setup_db_cc_classes(cc)
             except OperationalError as e:
                 log.debug_or_exception(e)
@@ -826,7 +853,8 @@ class CalibreDB():
     def reconnect_db(self, config, app_db_path):
         self.dispose()
         self.engine.dispose()
-        self.setup_db(config, app_db_path)
+        self.setup_db(config.config_calibre_dir, app_db_path)
+        self.update_config(config)
 
 
 def lcase(s):
