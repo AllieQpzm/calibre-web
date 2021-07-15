@@ -9,14 +9,14 @@
       <div class="cover">
           <a href="{{ url_for('web.show_book', book_id=entry.id) }}">
               <span class="img">
-                <img src="{{ url_for('web.get_cover', book_id=entry.id) }}" alt="{{ entry.title }}" />
+                <img title="{{ entry.title }}" src="{{ url_for('web.get_cover', book_id=entry.id) }}" alt="{{ entry.title }}" />
                 {% if entry.id in read_book_ids %}<span class="badge read glyphicon glyphicon-ok"></span>{% endif %}
               </span>
           </a>
       </div>
       <div class="meta">
         <a href="{{ url_for('web.show_book', book_id=entry.id) }}">
-          <p class="title">{{entry.title|shortentitle}}</p>
+          <p title="{{entry.title}}" class="title">{{entry.title|shortentitle}}</p>
         </a>
         <p class="author">
           {% for author in entry.authors %}
@@ -86,14 +86,19 @@
       <div class="cover">
           <a href="{{ url_for('web.show_book', book_id=entry.id) }}">
             <span class="img">
-              <img src="{{ url_for('web.get_cover', book_id=entry.id) }}" alt="{{ entry.title }}"/>
+              <img title="{{ entry.title }}" src="{{ url_for('web.get_cover', book_id=entry.id) }}" alt="{{ entry.title }}"/>
               {% if entry.id in read_book_ids %}<span class="badge read glyphicon glyphicon-ok"></span>{% endif %}
             </span>
           </a>
       </div>
       <div class="meta">
+<<<<<<< HEAD
         <a href="{{ url_for('web.show_book', book_id=entry.id) }}">
           <p class="title">{{entry.title|shortentitle}}</p>
+=======
+        <a href="{{ url_for('web.show_book', book_id=entry.id) }}" data-toggle="modal" data-target="#bookDetailsModal" data-remote="false">
+          <p title="{{ entry.title }}" class="title">{{entry.title|shortentitle}}</p>
+>>>>>>> 20fa9f55234dc1c9b526c933aef03e47351d817f
         </a>
         <p class="author">
           {% for author in entry.authors %}
