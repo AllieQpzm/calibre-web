@@ -92,13 +92,8 @@
           </a>
       </div>
       <div class="meta">
-<<<<<<< HEAD
         <a href="{{ url_for('web.show_book', book_id=entry.id) }}">
-          <p class="title">{{entry.title|shortentitle}}</p>
-=======
-        <a href="{{ url_for('web.show_book', book_id=entry.id) }}" data-toggle="modal" data-target="#bookDetailsModal" data-remote="false">
           <p title="{{ entry.title }}" class="title">{{entry.title|shortentitle}}</p>
->>>>>>> 20fa9f55234dc1c9b526c933aef03e47351d817f
         </a>
         <p class="author">
           {% for author in entry.authors %}
